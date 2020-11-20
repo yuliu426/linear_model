@@ -1,0 +1,201 @@
+---
+title: "linear model"
+author: "Yu"
+date: "November 19, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(p8105.datasets)
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.asp = .6, 
+  out.width = '90%'
+)
+
+theme_set(theme_minimal() + theme(legend.position = 'bottom'))  #apply this theme setting everywhere in this document
+
+options(
+  ggplot2.continuous.color = 'viridis',
+  ggplot2.continuous.fill = 'viridis'
+)
+
+scale_color_discrete = scale_color_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+```
+
+
+##import data
+```{r}
+data('nyc_airbnb')
+
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(stars = review_scores_location / 2) %>% 
+  rename(
+    borough = neighbourhood_group
+  ) %>% 
+  filter(borough != 'Staten Island') %>% 
+  select(price,stars, borough, neighbourhood, room_type)
+
+```
+
+
+## Fir a model
+
+```{r}
+nyc_airbnb %>% 
+  ggplot(aes(x = stars, y = price, color = borough))+
+  geom_point()
+```
+
+
+Let's fit a model we care a bout
+
+```{r}
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+```
+
+Let's look at the result...
+
+```{r, include = FALSE}
+fit
+
+coef(fit)
+residuals(fit)
+
+summary(fit)
+
+
+```
+
+Let's look at the result better.
+
+```{r}
+broom::glance(fit)
+
+broom::tidy(fit) %>% 
+  select(-std.error, -statistic) %>% 
+  mutate(
+    term = str_replace(term, 'borough', 'Borough:')
+  ) %>% 
+  knitr::kable(digits = 3)
+```
+
+
+## Be in control of factors
+
+```{r}
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(
+    borough = fct_infreq(borough),
+    room_type = fct_infreq(room_type)
+  )
+```
+
+
+
+```{r}
+nyc_airbnb %>% 
+  ggplot(aes(x = stars, y = price, color = borough))+
+  geom_point()
+```
+
+
+
+```{r}
+fit = lm(price ~ stars + borough, data = nyc_airbnb)
+
+broom::tidy(fit)
+broom::glance(fit)
+```
+
+## Diagnostics
+
+```{r}
+nyc_airbnb %>% 
+  modelr::add_residuals(fit) %>% 
+    ggplot(aes(x = borough, y = resid)) +
+    geom_violin() +
+    ylim(-500, 1500)
+
+nyc_airbnb %>% 
+  modelr::add_residuals(fit) %>% 
+   ggplot(aes(x = stars, y = resid)) + 
+     geom_point() +
+     facet_wrap(. ~ borough)
+```
+
+
+## Hypothesis Tests
+
+This does T tSET by default
+
+```{r}
+fit %>% 
+broom::tidy()
+```
+
+
+what about the signiifcance of `borough`
+
+```{r}
+fit_null = lm(price ~ stars, data = nyc_airbnb)
+fit_alt = lm(price ~ stars + borough, data = nyc_airbnb)
+
+anova(fit_null, fit_alt) %>% 
+  broom::tidy()
+```
+
+
+
+##Nest data, fit models
+
+This is pretty formal and also complex
+
+```{r}
+fit = lm(price ~ stars * borough + room_type * borough, data = nyc_airbnb)
+
+broom::tidy(fit)
+```
+
+This is more exploratory but maybe easier to understand
+
+```{r}
+nyc_airbnb %>% 
+  nest(data = -borough) %>% 
+  mutate(
+    models = map(.x = data, ~lm(price ~ stars + room_type, data = .x)),
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(-data, -models) %>% 
+  unnest(results) %>% 
+  filter(term != '(Intercept)') %>% 
+  select(borough, term, estimate) %>% 
+  pivot_wider(
+    names_from = borough,
+    values_from = estimate
+  )
+```
+
+
+Let's nest even more ...
+
+```{r}
+nyc_airbnb %>% 
+  filter(borough == 'Manhattan') %>% 
+  nest(data = -neighbourhood) %>% 
+  mutate(
+    models = map(.x = data, ~lm(price ~ stars + room_type, data = .x)),
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(-data, -models) %>% 
+  unnest(results) %>% 
+  filter(str_detect(term, 'room_type')) %>% 
+  ggplot(aes(x = neighbourhood, y = estimate))+
+  geom_point() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  facet_wrap(.~term)
+```
+
